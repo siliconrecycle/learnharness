@@ -11,8 +11,8 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { resolveSearchEngineFor, tavilyProvider, braveProvider, exaProvider, firecrawlProvider, ollamaProvider } from "../src/server/search.ts";
-import { SEARCH_ENGINES, isSearchEngineId, type SearchEngineId } from "../src/core/search.ts";
+import { resolveSearchEngineFor, tavilyProvider, braveProvider, exaProvider, firecrawlProvider, ollamaProvider, deepseekProvider } from "../src/server/search.ts";
+import { DEEPSEEK_SEARCH_BILLING_NOTE, SEARCH_ENGINES, isSearchEngineId, type SearchEngineId } from "../src/core/search.ts";
 
 describe("resolveSearchEngineFor (the auto-detect decision)", () => {
 	it("no keys: honestly unavailable, no default", () => {
@@ -285,12 +285,112 @@ describe("ollamaProvider (hosted search only)", () => {
 	});
 });
 
-describe("five-engine catalog and resolution", () => {
+describe("deepseekProvider (independent Search API, docs verified 2026-11-20)", () => {
+	const key = "sk-deepseek-test-key-0001";
+
+	it("POSTs /v1/tools/search with the model key and normalizes title, url, and snippet", async () => {
+		const provider = deepseekProvider(key, stubFetch({
+			results: [
+				{
+					rerank_score: 2.4,
+					title: "Example",
+					url: "https://example.com/a",
+					snippet: "line1\nline2",
+					summary: "longer summary that must not replace the snippet",
+					content: "page body that search must not return",
+					site_name: "Example",
+				},
+				{ title: "", url: "https://example.com/b", snippet: "   ", summary: "y".repeat(600) },
+				{ url: "https://example.com/c", summary: "summary only" },
+				{ title: "Dropped", snippet: "no url" },
+				{ title: "Script", url: "javascript:alert(1)", snippet: "no" },
+				null,
+			],
+		}, (url, init) => {
+			assert.equal(url, "https://api.deepseek.com/v1/tools/search");
+			assert.equal(init.method, "POST");
+			const headers = init.headers as Record<string, string>;
+			assert.equal(headers.authorization, `Bearer ${key}`);
+			assert.equal(headers["content-type"], "application/json");
+			assert.deepEqual(JSON.parse(init.body as string), {
+				query: "DeepSeek site:example.com",
+				count: 5,
+			});
+			assert.equal(JSON.parse(init.body as string).need_content, undefined);
+			assert.ok(!String(init.body).includes(key));
+			assert.ok(init.signal);
+		}));
+		assert.deepEqual(await provider.search("  DeepSeek site:example.com  ", 5), [
+			{ title: "Example", url: "https://example.com/a", snippet: "line1 line2" },
+			{ title: "https://example.com/b", url: "https://example.com/b", snippet: "y".repeat(500) },
+			{ title: "https://example.com/c", url: "https://example.com/c", snippet: "summary only" },
+		]);
+		assert.equal("fetchPage" in provider, false);
+	});
+
+	it("rejects an empty or over-long query before any request", async () => {
+		let calls = 0;
+		const provider = deepseekProvider(key, async () => {
+			calls += 1;
+			return new Response(JSON.stringify({ results: [] }));
+		});
+		await assert.rejects(provider.search("   ", 5), /DeepSeek search query must be 1-128 characters/);
+		await assert.rejects(provider.search("x".repeat(129), 5), /1-128 characters/);
+		assert.equal(calls, 0);
+		const accepted = await deepseekProvider(key, async (_url, init) => {
+			assert.equal(JSON.parse(init.body as string).query, "😀".repeat(128));
+			return new Response(JSON.stringify({ results: [] }));
+		}).search("😀".repeat(128), 1);
+		assert.deepEqual(accepted, []);
+	});
+
+	it("reports timeout, transport, and upstream failures without the key or response body", async () => {
+		const timeout = deepseekProvider(key, async () => {
+			throw new DOMException(`timed out with ${key}`, "TimeoutError");
+		});
+		await assert.rejects(timeout.search("q", 5), { message: "DeepSeek search API timed out" });
+		const aborted = deepseekProvider(key, async () => {
+			throw new DOMException(`aborted ${key}`, "AbortError");
+		});
+		await assert.rejects(aborted.search("q", 5), { message: "DeepSeek search API timed out" });
+		const offline = deepseekProvider(key, async () => {
+			throw new Error(`connect ECONNREFUSED ${key}`);
+		});
+		await assert.rejects(offline.search("q", 5), { message: "DeepSeek search API request failed" });
+		let calls = 0;
+		const denied = deepseekProvider(key, async () => {
+			calls += 1;
+			return new Response(JSON.stringify({ error: { message: `invalid ${key}`, type: "authentication_error", param: null, code: "invalid_request_error" } }), { status: 401 });
+		});
+		await assert.rejects(denied.search("q", 5), (error: Error) => error.message === "DeepSeek search API 401" && !error.message.includes(key));
+		assert.equal(calls, 1);
+	});
+});
+
+it("DeepSeek stays behind earlier engines unless it is pinned", () => {
+	assert.equal(resolveSearchEngineFor(undefined, { deepseek: "sk-deepseek-test-key-0001" }).engine, "deepseek");
+	assert.match(resolveSearchEngineFor(undefined, { deepseek: "sk-deepseek-test-key-0001" }).reason, /auto/);
+	assert.equal(resolveSearchEngineFor(undefined, { deepseek: "sk-deepseek-test-key-0001", ollama: "ollama-key" }).engine, "ollama");
+	assert.equal(resolveSearchEngineFor(undefined, { deepseek: "sk-deepseek-test-key-0001", tavily: "tvly-key" }).engine, "tavily");
+	assert.equal(resolveSearchEngineFor("deepseek", { deepseek: "sk-deepseek-test-key-0001", tavily: "tvly-key" }).engine, "deepseek");
+	const missing = resolveSearchEngineFor("deepseek", { tavily: "tvly-throwaway-key-00001" });
+	assert.equal(missing.available, false);
+	assert.equal(missing.engine, null);
+	assert.match(missing.reason, /DEEPSEEK_API_KEY/);
+	assert.equal(missing.reason.includes("tvly-throwaway-key-00001"), false);
+});
+
+describe("search catalog and resolution", () => {
 	it("pins the approved Automatic order independently of table-driven tests", () => {
-		assert.deepEqual(SEARCH_ENGINES.map(({ id }) => id), ["tavily", "brave", "exa", "firecrawl", "ollama"]);
+		assert.deepEqual(SEARCH_ENGINES.map(({ id }) => id), ["tavily", "brave", "exa", "firecrawl", "ollama", "deepseek"]);
+		assert.equal(SEARCH_ENGINES.find((engine) => engine.id === "deepseek")?.envVar, "DEEPSEEK_API_KEY");
 		assert.equal(isSearchEngineId("chatgpt"), false);
-		assert.equal(isSearchEngineId("deepseek"), false);
+		assert.equal(isSearchEngineId("deepseek"), true);
 		for (const value of [null, {}, 1, "", "toString"]) assert.equal(isSearchEngineId(value), false);
+		assert.match(DEEPSEEK_SEARCH_BILLING_NOTE, /\$0\.75 per 1,000 requests/);
+		assert.match(DEEPSEEK_SEARCH_BILLING_NOTE, /DEEPSEEK_API_KEY/);
+		assert.match(DEEPSEEK_SEARCH_BILLING_NOTE, /not billed/);
+		assert.match(DEEPSEEK_SEARCH_BILLING_NOTE, /separate path/);
 	});
 
 	it("resolves every combination of configured keys without changing precedence", () => {
@@ -320,6 +420,7 @@ const NEW_ADAPTERS = [
 	{ label: "Exa", create: exaProvider, body: { results: [] }, field: "numResults", max: 100 },
 	{ label: "Firecrawl", create: firecrawlProvider, body: { success: true, data: { web: [] } }, field: "limit", max: 100 },
 	{ label: "Ollama", create: ollamaProvider, body: { results: [] }, field: "max_results", max: 10 },
+	{ label: "DeepSeek", create: deepseekProvider, body: { results: [] }, field: "count", max: 50 },
 ] as const;
 
 for (const { label, create, body, field, max } of NEW_ADAPTERS) {

@@ -232,6 +232,13 @@ describe("AgentSection (thin SSR)", () => {
 			<AgentSection agent={{ search: { engine: "ollama" } }} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />,
 		);
 		assert.ok(ollama.includes("Ollama"), "an Ollama pin reads by its label");
+		const deepseek = renderToStaticMarkup(
+			<AgentSection agent={{ search: { engine: "deepseek" } }} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />,
+		);
+		assert.ok(deepseek.includes("DeepSeek"), "a DeepSeek pin reads by its label");
+		assert.ok(deepseek.includes("$0.75 per 1,000 requests"), "a DeepSeek pin shows the independent Search API price");
+		assert.ok(deepseek.includes("DEEPSEEK_API_KEY"), "the billing note names the reused model key");
+		assert.ok(!deepseek.includes("127.0.0.1"), "the search row does not embed a proxy address");
 	});
 
 	it("the prober graph-tools row: FIRST in the Tools group, default ON, its own key (wave 7)", () => {

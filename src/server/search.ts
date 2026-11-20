@@ -9,7 +9,8 @@
  *    store or env — env wins, keyed via server/keys.ts keyValue).
  *  - Setting a key is ALL the user does — auto-detection: explicit
  *    agent.search.engine pins the preference (when several keys are
- *    present the order is Tavily → Brave → Exa → Firecrawl → Ollama);
+ *    present the order is Tavily → Brave → Exa → Firecrawl → Ollama →
+ *    DeepSeek);
  *    without a pin, the first keyed engine wins.
  *  - An explicit choice does NOT silently fall back to another engine:
  *    engine pinned but its key missing = honestly unavailable (reason
@@ -211,6 +212,69 @@ export function ollamaProvider(apiKey: string, fetchFn: FetchLike = fetch): Sear
 	};
 }
 
+/** DeepSeek's independent Search API, verified 2026-11-20 against
+ *  https://api-docs.deepseek.com/guides/search/ and
+ *  https://api-docs.deepseek.com/api/search.md.
+ *
+ *  POST https://api.deepseek.com/v1/tools/search with the same
+ *  DEEPSEEK_API_KEY the model provider already uses. This is not the
+ *  server-side model web-tool path, and it does not call
+ *  /v1/tools/fetch; page reads stay on web_fetch.
+ *
+ *  Transport is the injected fetch, the same one the other search
+ *  adapters use. Node applies HTTP_PROXY, HTTPS_PROXY, and NO_PROXY to
+ *  that fetch only when NODE_USE_ENV_PROXY=1. This adapter does not read
+ *  a product proxy setting and does not use web_fetch's undici agent.
+ *  A successful response with a non-empty results array is billed by
+ *  DeepSeek at $0.75 per 1,000 requests. Empty results, failures, and
+ *  timeouts are not billed. The adapter does not retry. */
+export function deepseekProvider(apiKey: string, fetchFn: FetchLike = fetch): SearchProvider {
+	return {
+		id: "deepseek",
+		async search(query: string, count: number): Promise<SearchHit[]> {
+			const trimmed = query.trim();
+			const chars = Array.from(trimmed).length;
+			if (chars < 1 || chars > 128) throw new Error("DeepSeek search query must be 1-128 characters");
+			let resp: Response;
+			try {
+				resp = await fetchFn("https://api.deepseek.com/v1/tools/search", {
+					method: "POST",
+					headers: {
+						"content-type": "application/json",
+						authorization: `Bearer ${apiKey}`,
+					},
+					body: JSON.stringify({ query: trimmed, count: boundedSearchCount(count, 50) }),
+					signal: AbortSignal.timeout(30_000),
+				});
+			} catch (err) {
+				if (isSearchTimeout(err)) throw new Error("DeepSeek search API timed out");
+				throw new Error("DeepSeek search API request failed");
+			}
+			if (!resp.ok) throw new Error(`DeepSeek search API ${resp.status}`);
+			const data = await searchJson(resp, "DeepSeek");
+			if (!data || typeof data !== "object" || !Array.isArray((data as { results?: unknown }).results)) {
+				throw new Error("DeepSeek search API returned an invalid response");
+			}
+			return (data as { results: unknown[] }).results.flatMap((result): SearchHit[] => {
+				if (!result || typeof result !== "object") return [];
+				const row = result as { title?: unknown; url?: unknown; snippet?: unknown; summary?: unknown };
+				const snippet = typeof row.snippet === "string" && row.snippet.trim() ? row.snippet : row.summary;
+				return searchHit(row.title, row.url, snippet);
+			});
+		},
+	};
+}
+
+function boundedSearchCount(count: number, max: number): number {
+	const n = Math.floor(count);
+	if (!Number.isFinite(n)) return 1;
+	return Math.min(max, Math.max(1, n));
+}
+
+function isSearchTimeout(err: unknown): boolean {
+	return err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+}
+
 /** Match Exa's bounded result contract for the other new adapters. */
 function searchHit(title: unknown, url: unknown, snippet: unknown): SearchHit[] {
 	if (typeof url !== "string" || !url.trim()) return [];
@@ -270,7 +334,7 @@ export function resolveSearchEngineFor(
 	return {
 		available: false,
 		engine: null,
-		reason: "no search engine configured — set a Tavily, Brave, Exa, Firecrawl, or Ollama search API key",
+		reason: "no search engine configured — set a Tavily, Brave, Exa, Firecrawl, or Ollama search API key, or the DeepSeek model key (DEEPSEEK_API_KEY)",
 		key: null,
 	};
 }
@@ -308,6 +372,8 @@ export function searchProvider(): SearchProvider | null {
 			return firecrawlProvider(resolved.key);
 		case "ollama":
 			return ollamaProvider(resolved.key);
+		case "deepseek":
+			return deepseekProvider(resolved.key);
 		default:
 			return null;
 	}

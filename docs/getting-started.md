@@ -13,7 +13,7 @@ Open **Settings → Providers** and configure a connection:
 
 Choose **Strong**, **Cheap**, and **Vision** models in Settings. There are no factory model selections. New sessions start with Strong; background roles use their assigned slots or role overrides. A model selected inside an existing session belongs to that session and does not change background-role choices.
 
-Optional web search supports Tavily, Brave, Exa, Firecrawl, and hosted Ollama search; configure a key for the engine you want to use. Research can still fetch known URLs without a search key. Dictation has its own service key below.
+Optional web search supports Tavily, Brave, Exa, Firecrawl, hosted Ollama, and DeepSeek. Configure a key for the engine you want, or leave the choice on Automatic: the first keyed engine wins, in that order. DeepSeek reuses the model key `DEEPSEEK_API_KEY` and does not add a second secret. Its researcher search calls the independent Search API (`POST https://api.deepseek.com/v1/tools/search`). A successful search that returns at least one result costs **$0.75 per 1,000 requests**. Empty results, failed requests, and timeouts are not billed. This is not DeepSeek's server-side model web search; that path has no separate search fee and is not used here. Page reading stays on the existing fetch tool and does not call DeepSeek's Fetch API. Research can still fetch known URLs without a search key. Dictation has its own service key below.
 
 ## Start a session
 

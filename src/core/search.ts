@@ -28,14 +28,24 @@ export interface SearchHit {
 }
 
 /** Search engines in automatic preference order. Keep existing preferences
- * stable when adding an engine: an explicit pin always wins. */
+ * stable when adding an engine: an explicit pin always wins. DeepSeek is
+ * last so a model key does not replace an already configured search engine. */
 export const SEARCH_ENGINES = [
 	{ id: "tavily", label: "Tavily", envVar: "TAVILY_API_KEY" },
 	{ id: "brave", label: "Brave", envVar: "BRAVE_API_KEY" },
 	{ id: "exa", label: "Exa", envVar: "EXA_API_KEY" },
 	{ id: "firecrawl", label: "Firecrawl", envVar: "FIRECRAWL_API_KEY" },
 	{ id: "ollama", label: "Ollama", envVar: "OLLAMA_API_KEY" },
+	{ id: "deepseek", label: "DeepSeek", envVar: "DEEPSEEK_API_KEY" },
 ] as const;
+
+/** Settings copy for the independent DeepSeek Search API.
+ * Pricing checked against api-docs.deepseek.com/guides/search and
+ * api-docs.deepseek.com/quick_start/pricing on 2026-11-20.
+ * Server-side model web tools are a different path: they have no separate
+ * search fee, and this adapter does not call them. */
+export const DEEPSEEK_SEARCH_BILLING_NOTE =
+	"DeepSeek search uses the independent Search API and the existing DEEPSEEK_API_KEY. Successful searches cost $0.75 per 1,000 requests; empty results and failed requests are not billed. Model web-search tools are a separate path and are not used.";
 
 export type SearchEngineId = (typeof SEARCH_ENGINES)[number]["id"];
 

@@ -63,6 +63,7 @@ import { Hint } from "@/components/ui/hint";
 import type React from "react";
 import {
 	COMPACTION_THRESHOLD_FLOOR,
+	DEEPSEEK_SEARCH_BILLING_NOTE,
 	MODEL_SLOTS,
 	SEARCH_ENGINES,
 	resolveSettings,
@@ -952,10 +953,12 @@ export function AgentSection({
 					const engine = agent?.search?.engine ?? null;
 					const anyKey = SEARCH_ENGINES.some(({ id }) => engineKeys[id] === true);
 					const open = openMenu?.target === "search";
+					const showDeepSeekBilling = engine === "deepseek" || search?.engine === "deepseek";
+					const searchHint = [search?.reason, showDeepSeekBilling ? DEEPSEEK_SEARCH_BILLING_NOTE : undefined].filter(Boolean).join(" ") || undefined;
 					return (
 						<SettingsRow
 							label="Search engine"
-							hint={search?.reason ?? undefined}
+							hint={searchHint}
 							testid="search-engine-row"
 							dimmed={!anyKey}
 						>

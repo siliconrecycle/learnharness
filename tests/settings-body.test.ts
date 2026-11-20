@@ -93,7 +93,9 @@ describe("parseAgentSettingsBody", () => {
 		const ollama = parseAgentSettingsBody({ search: { engine: "ollama" } });
 		assert.ok(ollama.ok);
 		assert.deepEqual(ollama.settings.search, { engine: "ollama" });
-		assert.equal(parseAgentSettingsBody({ search: { engine: "deepseek" } }).ok, false);
+		const deepseek = parseAgentSettingsBody({ search: { engine: "deepseek" } });
+		assert.ok(deepseek.ok);
+		assert.deepEqual(deepseek.settings.search, { engine: "deepseek" });
 		assert.equal(parseAgentSettingsBody({ search: { engine: "chatgpt" } }).ok, false);
 		const clear = parseAgentSettingsBody({ search: {} });
 		assert.ok(clear.ok);
