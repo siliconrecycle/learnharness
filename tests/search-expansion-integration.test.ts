@@ -77,7 +77,7 @@ for (const { id, envVar, url, header, prefix, payload } of engines) {
 	});
 }
 
-it("all five saved keys follow the approved Automatic order as keys are removed", () => {
+it("every saved search key follows the approved Automatic order as keys are removed", () => {
 	for (const { id, envVar } of SEARCH_ENGINES) {
 		const fake = id === "tavily" ? "tvly-fake-key-1234567890" : id === "firecrawl" ? "fc-fake-key-1234567890" : `${id}-fake-key-1234567890`;
 		assert.equal(saveKey(envVar, fake).ok, true);
@@ -89,6 +89,57 @@ it("all five saved keys follow the approved Automatic order as keys are removed"
 	}
 	assert.equal(searchStatus().available, false);
 	assert.equal(searchProvider(), null);
+});
+
+it("DeepSeek search reuses DEEPSEEK_API_KEY and ignores the Cheap model", async () => {
+	const fake = "sk-deepseek-test-key-0001";
+	assert.equal(saveKey("DEEPSEEK_API_KEY", "short").ok, false, "an invalid model key is not stored for search");
+	assert.equal(searchStatus().available, false);
+	assert.equal(saveKey("DEEPSEEK_API_KEY", fake).ok, true);
+	const written = writeSettings({
+		version: 1,
+		models: {
+			strong: { model: { provider: "deepseek", id: "deepseek-chat" } },
+			cheap: { model: { provider: "custom", id: "local-model" } },
+		},
+	});
+	assert.equal(written.models?.cheap?.model?.provider, "custom");
+	assert.equal(written.models?.strong?.model?.provider, "deepseek");
+	assert.equal(searchStatus().engine, "deepseek");
+	assert.equal(searchProvider()?.id, "deepseek");
+	let calls = 0;
+	globalThis.fetch = async (input, init) => {
+		calls += 1;
+		assert.equal(String(input), "https://api.deepseek.com/v1/tools/search");
+		assert.equal((init?.headers as Record<string, string>).authorization, `Bearer ${fake}`);
+		assert.equal(JSON.parse(String(init?.body)).need_content, undefined);
+		assert.equal(String(init?.body).includes(fake), false);
+		return Response.json({ results: [] });
+	};
+	assert.deepEqual(await searchProvider()!.search("evidence", 1), []);
+	assert.equal(JSON.stringify(searchStatus()).includes(fake), false);
+	assert.equal(saveKey("TAVILY_API_KEY", "tvly-fake-key-1234567890").ok, true);
+	writeSettings({ version: 1, models: written.models });
+	assert.equal(searchStatus().engine, "tavily", "Automatic keeps the existing engine ahead of DeepSeek");
+	writeSettings({ version: 1, models: written.models, agent: { search: { engine: "deepseek" } } });
+	assert.equal(readSettings()?.agent?.search?.engine, "deepseek");
+	assert.equal(readSettings()?.models?.cheap?.model?.id, "local-model");
+	await searchProvider()!.search("evidence", 1);
+	try {
+		process.env.DEEPSEEK_API_KEY = `${fake}-environment`;
+		globalThis.fetch = async (_input, init) => {
+			assert.equal((init?.headers as Record<string, string>).authorization, `Bearer ${fake}-environment`);
+			return Response.json({ results: [{ title: "Env", url: "https://example.com/env", snippet: "from env" }] });
+		};
+		assert.deepEqual(await searchProvider()!.search("evidence", 1), [{ title: "Env", url: "https://example.com/env", snippet: "from env" }]);
+	} finally {
+		delete process.env.DEEPSEEK_API_KEY;
+	}
+	deleteKey("DEEPSEEK_API_KEY");
+	assert.equal(searchStatus().available, false);
+	assert.match(searchStatus().reason, /DEEPSEEK_API_KEY/);
+	assert.equal(searchProvider(), null);
+	assert.equal(calls, 2);
 });
 
 it("a configured later engine does not become a network-error fallback", async () => {

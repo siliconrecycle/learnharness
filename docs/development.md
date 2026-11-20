@@ -51,12 +51,14 @@ Nonsecret settings are deltas in `<data root>/settings.json`; absent values reso
 | `LH_DATA_DIR` | Mutable chats/jobs/graph/settings/prompts; default repo `data/`. |
 | `LH_AUTH_FILE` | Keys/custom-endpoint binding; default repo-root `auth.json`, outside `data/`. |
 | Provider API-key variables | Optional, selected-provider dependent; UI names are in `src/core/auth-keys.ts`. |
-| `TAVILY_API_KEY`, `BRAVE_API_KEY`, `EXA_API_KEY`, `FIRECRAWL_API_KEY`, `OLLAMA_API_KEY` | Optional search adapters. Without a Settings pin, the first keyed engine wins: Tavily → Brave → Exa → Firecrawl → Ollama. A pinned engine requires its own key; no silent fallback. Ollama search is hosted at ollama.com, not a local model server. Page fetching is independent; research can fetch known URLs without a search key. |
+| `TAVILY_API_KEY`, `BRAVE_API_KEY`, `EXA_API_KEY`, `FIRECRAWL_API_KEY`, `OLLAMA_API_KEY`, and the existing `DEEPSEEK_API_KEY` | Optional search adapters. Without a Settings pin, the first keyed engine wins: Tavily → Brave → Exa → Firecrawl → Ollama → DeepSeek. A pinned engine requires its own key; no silent fallback. DeepSeek search reuses the model key and calls `POST https://api.deepseek.com/v1/tools/search`. Successful non-empty searches cost $0.75 per 1,000 requests; empty results, failures, and timeouts are not billed. Server-side model web tools are a separate token-billed path and are not used. Ollama search is hosted at ollama.com, not a local model server. Page fetching is independent; research can fetch known URLs without a search key. |
 | `DEEPGRAM_API_KEY` | Optional dictation token minting. |
 | `CHROME_PATH` | Chrome/Chromium executable fallback for demo verification; Electron's browser helper is primary. No extra Chromium is downloaded. |
 | `LH_ALLOWED_HOSTS` | Browser-only mode: extra host names the API accepts besides `localhost` and IP addresses. Comma-separated, case-insensitive, port ignored, no wildcards. |
 
 Ordinary Next development can read `.env.local`. Real environment keys take precedence over saved keys. Saved auth is restrictive-permission plaintext, not an encrypted vault. Packaged Electron sets separate data/auth locations under `userData`; it does not use the repo development profile.
+
+Search requests, including DeepSeek, use Node's global `fetch`. `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` affect that fetch only when `NODE_USE_ENV_PROXY=1`. The app does not set a proxy or a LAN endpoint. `web_fetch` and `web_fetch_pdf` use a separate undici agent limited to public addresses; that agent does not follow the environment proxy. DeepSeek's Fetch API is not connected.
 
 Provider-specific setup and limitations: [Claude Code](claude-code.md), [custom endpoints](custom-providers.md), [context/cost accounting](compaction-accounting.md).
 
